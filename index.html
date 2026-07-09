@@ -1314,8 +1314,9 @@
                     "Set a Cloud Storage bucket retention policy to 60 days",
                     "Build a scheduled Cloud Run job that deletes files older than 60 days"
                 ],
-                correct: 1,
-                explanation: "V4 signed URLs grant temporary write-only permission (for option not shown), and lifecycle rules automatically delete objects at the specified age. Note: This is a simplified version since the original was a multi-select question."
+                correct: [0, 1],
+                multiSelect: true,
+                explanation: "V4 signed URLs grant temporary write-only permission, and lifecycle rules automatically delete objects at the specified age."
             },
             {
                 section: "Section 2",
@@ -2642,8 +2643,9 @@
                     "Split your BigQuery data warehouse into multiple data warehouses for each business unit.",
                     "Change your BigQuery query model from on-demand to flat rate. Apply the appropriate number of slots to each Project.",
                 ],
-                correct: 1,
-                explanation: "Apply a user- or project-level custom query quota for BigQuery data warehouse."
+                correct: [1, 4],
+                multiSelect: true,
+                explanation: "Custom query quotas limit spending per user/project. Switching to flat-rate pricing with allocated slots gives predictable costs per business unit."
             },
             {
                 section: "Section 2",
@@ -3399,8 +3401,9 @@
                     "Build a Cloud function that triggers a timer of 45 days to delete objects that have expired.",
                     "Develop a script that loops through all Cloud Storage buckets and deletes any buckets that are older than 45 days.",
                 ],
-                correct: 0,
-                explanation: "Build a lifecycle policy to delete Cloud Storage objects after 45 days."
+                correct: [0, 1],
+                multiSelect: true,
+                explanation: "Lifecycle policies handle automatic deletion after 45 days. Signed URLs grant temporary write-only access (30 min expiry) without needing individual accounts."
             },
             {
                 section: "Section 2",
@@ -3649,26 +3652,62 @@
         let userAnswers = {};
         let checkedQuestions = new Set();
 
+        function isCorrect(questionIndex) {
+            const question = questions[questionIndex];
+            const answer = userAnswers[questionIndex];
+            if (question.multiSelect) {
+                if (!Array.isArray(answer)) return false;
+                const correct = question.correct.slice().sort();
+                const user = answer.slice().sort();
+                return correct.length === user.length && correct.every((v, i) => v === user[i]);
+            }
+            return answer === question.correct;
+        }
+
+        function isOptionCorrect(question, index) {
+            if (question.multiSelect) return question.correct.includes(index);
+            return index === question.correct;
+        }
+
+        function isOptionSelected(userAnswer, index, isMulti) {
+            if (isMulti) return Array.isArray(userAnswer) && userAnswer.includes(index);
+            return userAnswer === index;
+        }
+
+        function hasAnswer(questionIndex) {
+            const question = questions[questionIndex];
+            const answer = userAnswers[questionIndex];
+            if (answer === undefined) return false;
+            if (question.multiSelect) return Array.isArray(answer) && answer.length === question.correct.length;
+            return true;
+        }
+
         function renderQuestion() {
             const question = questions[currentQuestionIndex];
             const isChecked = checkedQuestions.has(currentQuestionIndex);
             const userAnswer = userAnswers[currentQuestionIndex];
+            const isMulti = question.multiSelect;
+            const requiredCount = isMulti ? question.correct.length : 1;
+            const selectedCount = isMulti && Array.isArray(userAnswer) ? userAnswer.length : 0;
+            const answeredFully = hasAnswer(currentQuestionIndex);
+            const gotItRight = isChecked && isCorrect(currentQuestionIndex);
 
             const html = `
                 <div class="question-card">
                     <div class="question-header">
                         <div class="question-number">${currentQuestionIndex + 1}</div>
+                        ${isMulti ? '<div class="section-badge" style="background:#49483e;color:#fd971f;">Select ' + requiredCount + '</div>' : ''}
                         <div class="section-badge">${question.section}</div>
                     </div>
                     <div class="question-text">${question.question}</div>
                     <div class="options">
                         ${question.options.map((option, index) => {
                             let optionClass = 'option';
-                            if (userAnswer === index) optionClass += ' selected';
+                            if (isOptionSelected(userAnswer, index, isMulti)) optionClass += ' selected';
                             if (isChecked) {
-                                if (index === question.correct) {
+                                if (isOptionCorrect(question, index)) {
                                     optionClass += ' correct-answer';
-                                } else if (userAnswer === index && index !== question.correct) {
+                                } else if (isOptionSelected(userAnswer, index, isMulti) && !isOptionCorrect(question, index)) {
                                     optionClass += ' incorrect';
                                 }
                             }
@@ -3680,16 +3719,17 @@
                             `;
                         }).join('')}
                     </div>
-                    <div class="feedback ${isChecked ? 'show' : ''} ${isChecked && userAnswer === question.correct ? 'correct' : 'incorrect'}">
+                    ${isMulti && !isChecked ? '<div style="color:#75715e;font-size:13px;margin-top:8px;">' + selectedCount + '/' + requiredCount + ' selected</div>' : ''}
+                    <div class="feedback ${isChecked ? 'show' : ''} ${gotItRight ? 'correct' : 'incorrect'}">
                         <div class="feedback-title">
-                            ${userAnswer === question.correct ? '✓ Correct!' : '✗ Incorrect'}
+                            ${gotItRight ? '✓ Correct!' : '✗ Incorrect'}
                         </div>
                         <div class="feedback-text">
                             <strong>Explanation:</strong> ${question.explanation}
                         </div>
                     </div>
                     <div class="controls">
-                        <button class="btn btn-primary" onclick="checkAnswer()" ${userAnswer === undefined || isChecked ? 'disabled' : ''}>
+                        <button class="btn btn-primary" onclick="checkAnswer()" ${!answeredFully || isChecked ? 'disabled' : ''}>
                             Check Answer
                         </button>
                         ${isChecked ? `
@@ -3707,14 +3747,29 @@
         }
 
         function selectOption(index) {
-            if (!checkedQuestions.has(currentQuestionIndex)) {
+            if (checkedQuestions.has(currentQuestionIndex)) return;
+            const question = questions[currentQuestionIndex];
+            if (question.multiSelect) {
+                let current = userAnswers[currentQuestionIndex] || [];
+                if (!Array.isArray(current)) current = [];
+                if (current.includes(index)) {
+                    current = current.filter(i => i !== index);
+                } else {
+                    if (current.length < question.correct.length) {
+                        current = [...current, index];
+                    } else {
+                        current = [...current.slice(1), index];
+                    }
+                }
+                userAnswers[currentQuestionIndex] = current;
+            } else {
                 userAnswers[currentQuestionIndex] = index;
-                renderQuestion();
             }
+            renderQuestion();
         }
 
         function checkAnswer() {
-            if (userAnswers[currentQuestionIndex] !== undefined) {
+            if (hasAnswer(currentQuestionIndex)) {
                 checkedQuestions.add(currentQuestionIndex);
                 renderQuestion();
             }
@@ -3745,7 +3800,7 @@
         function updateStats() {
             const answeredCount = Object.keys(userAnswers).length;
             const correctCount = Object.keys(userAnswers).filter(key => {
-                return checkedQuestions.has(parseInt(key)) && userAnswers[key] === questions[key].correct;
+                return checkedQuestions.has(parseInt(key)) && isCorrect(parseInt(key));
             }).length;
             const scorePercent = answeredCount > 0 ? Math.round((correctCount / answeredCount) * 100) : 0;
 
@@ -3762,7 +3817,7 @@
             const totalQuestions = questions.length;
             const answeredCount = Object.keys(userAnswers).length;
             const correctCount = Object.keys(userAnswers).filter(key => {
-                return checkedQuestions.has(parseInt(key)) && userAnswers[key] === questions[key].correct;
+                return checkedQuestions.has(parseInt(key)) && isCorrect(parseInt(key));
             }).length;
             const incorrectCount = answeredCount - correctCount;
             const unansweredCount = totalQuestions - answeredCount;
@@ -3852,7 +3907,7 @@
             for (let i = 0; i < questions.length; i++) {
                 let cellClass = 'grid-cell unanswered';
                 if (checkedQuestions.has(i)) {
-                    cellClass = userAnswers[i] === questions[i].correct ? 'grid-cell correct' : 'grid-cell incorrect';
+                    cellClass = isCorrect(i) ? 'grid-cell correct' : 'grid-cell incorrect';
                 }
                 if (i === currentQuestionIndex) cellClass += ' current';
                 html += `<div class="${cellClass}" onclick="jumpToQuestion(${i})">${i + 1}</div>`;
